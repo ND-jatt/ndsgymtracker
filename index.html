@@ -171,7 +171,7 @@ nav a.on{color:#fff;box-shadow:inset 0 3px 0 var(--red)}
       <h3 style="font-size:22px;margin-bottom:6px">Rest timer</h3>
       <div class="grid2">
         <label class="f">Default rest
-          <select id="restsec"><option value="60">1:00</option><option value="90">1:30</option><option value="120">2:00</option><option value="150">2:30</option><option value="180">3:00</option></select></label>
+          <select id="restsec"><option value="auto">Auto: 2:30 compound / 1:30 isolation</option><option value="60">1:00</option><option value="90">1:30</option><option value="120">2:00</option><option value="150">2:30</option><option value="180">3:00</option></select></label>
         <label class="f">Auto-start after logging reps
           <select id="restauto"><option value="1">On</option><option value="0">Off</option></select></label>
       </div>
@@ -269,7 +269,7 @@ const filled=t=>has(t.r)||has(t.r2);
 
 /* ---------- storage ---------- */
 const KEY="gymtracker_v1";
-let S={sessions:{},body:[],planText:DEFAULT_PLAN,rest:90,restAuto:1};
+let S={sessions:{},body:[],planText:DEFAULT_PLAN,rest:"auto",restAuto:1};
 let storeOK=true;
 try{const raw=localStorage.getItem(KEY);if(raw)S=Object.assign(S,JSON.parse(raw))}catch(e){storeOK=false}
 const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify(S));return true}catch(e){return false}};
@@ -303,6 +303,8 @@ const isUni=n=>/single-arm|lateral raises|bulgarian/i.test(n);
 const rangeOf=t=>{const m=String(t).match(/×\s*(\d+)(?:\s*-\s*(\d+))?/);return m?[+m[1],+(m[2]||m[1])]:[6,8]};
 const INC=n=>/lateral/i.test(n)?2.5:5;
 const GRP=n=>/plank|push-up|leg raise|crunch|back ext|ab /i.test(n)?"core":/calf/i.test(n)?"calves":/squat|deadlift|rdl|leg press|leg ext|leg curl|lunge|hip thrust/i.test(n)?"legs":/curl/i.test(n)?"biceps":/pulldown|\brows?\b|pullover|face pull/i.test(n)?"back":/tricep|pushdown|close-grip|skull|dip/i.test(n)?"triceps":/bench|chest|flies|fly|incline press|pec/i.test(n)?"chest":/shoulder press|lateral|delt/i.test(n)?"shoulders":"other";
+const isCompound=n=>/press|\brows?\b|pulldown|squat|rdl|deadlift|pull-up|chin-up|\bdips?\b/i.test(n)&&!/pushdown|calf/i.test(n);
+const restFor=n=>S.rest==="auto"||S.rest==null?(isCompound(n)?150:90):(+S.rest||90);
 const rnd=(x,i)=>Math.max(i,Math.round(x/i)*i);
 const e1=(w,r)=>{w=+w||0;r=+r||0;return w>0&&r>0&&r<=20?w*(1+r/30):0};
 const setBest=t=>Math.max(e1(t.w,t.r),e1(t.w2,t.r2));
@@ -440,7 +442,7 @@ $("list").addEventListener("change",e=>{const t=e.target;
     if(isUni(ex.n)&&!(has(set.r)&&has(set.r2)))return; // switching arms/legs: no rest yet
     const more=ex.sets.some((x,k)=>k>j&&!filled(x)); // another set of this exercise still to do
     if(!more){stopTimer();return}
-    if(+S.restAuto)startTimer(+S.rest||90);
+    if(+S.restAuto)startTimer(restFor(ex.n));
   }
 });
 $("list").addEventListener("click",e=>{
@@ -554,7 +556,7 @@ $("import").addEventListener("change",async e=>{
   e.target.value="";
 });
 const confirmPlan=t=>typeof t==="string"&&/^(MON|TUE|WED|THU|FRI|SAT|SUN)/im.test(t);
-$("restsec").addEventListener("change",e=>{S.rest=+e.target.value;persist()});
+$("restsec").addEventListener("change",e=>{S.rest=e.target.value==="auto"?"auto":+e.target.value;persist()});
 $("restauto").addEventListener("change",e=>{S.restAuto=+e.target.value;persist()});
 $("plansave").addEventListener("click",()=>{const t=$("plantext").value;if(!confirmPlan(t)){$("planmsg").textContent="Start with a day line like: MON | Push";return}
   if(dirty)save();S.planText=t;PLAN=parsePlan(t);persist();loadDraft();$("planmsg").textContent="Split saved.";});
@@ -580,7 +582,8 @@ document.addEventListener("visibilitychange",()=>{if(document.visibilityState===
 window.addEventListener("pagehide",()=>{if(dirty)save()});
 
 /* ---------- start ---------- */
-$("restsec").value=String(S.rest||90);$("restauto").value=String(S.restAuto??1);$("plantext").value=S.planText;
+if(!S.restSet){S.rest="auto";S.restSet=1;persist()}
+$("restsec").value=String(S.rest??"auto");$("restauto").value=String(S.restAuto??1);$("plantext").value=S.planText;
 loadDraft();route();
 (async()=>{try{
   const r=await fetch("seed-nd.json?"+Date.now());if(!r.ok)return;const j=await r.json();let n=0;
