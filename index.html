@@ -570,6 +570,11 @@ window.addEventListener("pagehide",()=>{if(dirty)save()});
 /* ---------- start ---------- */
 $("restsec").value=String(S.rest||90);$("restauto").value=String(S.restAuto??1);$("plantext").value=S.planText;
 loadDraft();route();
+(async()=>{try{const q=new URLSearchParams(location.search).get("seed");if(!q||!/^[a-z0-9-]+$/.test(q))return;
+  const r=await fetch("seed-"+q+".json?"+Date.now());if(!r.ok)return;const j=await r.json();let n=0;
+  for(const [id,s] of Object.entries(j.sessions||{})){if(!s||!s.date||!s.day||!Array.isArray(s.ex))continue;const cur=S.sessions[id];if(!cur){S.sessions[id]=s;n++}}
+  persist();history.replaceState(null,"",location.pathname+location.hash);loadDraft();route();status(n?`Loaded ${n} past session${n===1?"":"s"} ✓`:"History already loaded ✓");
+}catch(e){}})();
 status(storeOK?(Object.keys(S.sessions).length?"Saved on this device":"Start logging – it saves as you type"):"Storage blocked – turn off private browsing");
 }
 </script>
