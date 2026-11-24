@@ -165,6 +165,16 @@ nav a.on{color:#fff;box-shadow:inset 0 3px 0 var(--red)}
   <section class="view" id="v-more">
     <h2>Settings &amp; backup</h2>
     <div class="card">
+      <h3 style="font-size:22px;margin-bottom:6px">Sync with Claude</h3>
+      <p class="note">Saves your workouts to your private GitHub repo after every change, so Claude can read them and your data is backed up. Also keeps two devices in sync.</p>
+      <div class="grid2">
+        <label class="f">Private repo (owner/name)<input class="in" id="syncrepo" placeholder="ND-jatt/rocky-gym-data" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="f">GitHub token<input class="in" id="synctoken" type="password" placeholder="github_pat_…" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      </div>
+      <div class="acts"><button class="btn pri" id="syncsave" type="button">Save &amp; sync</button><button class="btn" id="syncnow" type="button">Sync now</button><button class="btn warn" id="syncoff" type="button">Turn off</button></div>
+      <p class="note" id="syncmsg"></p>
+    </div>
+    <div class="card">
       <h3 style="font-size:22px;margin-bottom:6px">Backup</h3>
       <p class="note">Your data lives in this browser on this device. Export a backup every week or so, and import it on a new phone or after clearing your browser.</p>
       <div class="acts">
@@ -325,13 +335,17 @@ const sid=()=>date+"_"+day;
 const before=s=>!(s.date>date||(s.date===date&&s.day===day));
 
 function lastFor(name){
-  let best=null;
+  // Prefer the most recent session on the same weekday (e.g. shoulder press on Saturday vs. after chest on Monday);
+  // fall back to the most recent session on any day.
+  let same=null,any=null;
   for(const s of Object.values(S.sessions)){
     if(!before(s))continue;
     const e=(s.ex||[]).find(e=>e.n===name&&e.sets.some(filled));
-    if(e&&(!best||s.date>best.s.date))best={s,e};
+    if(!e)continue;
+    if(!any||s.date>any.s.date)any={s,e};
+    if(s.day===day&&(!same||s.date>same.s.date))same={s,e};
   }
-  return best;
+  return same||any;
 }
 function bestBefore(name){let b=0;for(const s of Object.values(S.sessions)){if(!before(s))continue;for(const e of s.ex||[])if(e.n===name)for(const t of e.sets)b=Math.max(b,setBest(t))}return b}
 function pick(o){let n=o[0],d="";for(const x of o){const L=lastFor(x);if(L&&L.s.date>d){d=L.s.date;n=x}}return n}
@@ -412,9 +426,67 @@ function queueSave(){dirty=true;status("Saving…");clearTimeout(timer);timer=se
 function save(){
   clearTimeout(timer);
   const id=sid(),any=draft.ex.some(e=>e.sets.some(filled))||draft.notes.trim();
-  if(any){const b=clone(draft);b.updated=Date.now();S.sessions[id]=b}else delete S.sessions[id];
-  dirty=false;status(persist()?"Saved ✓":"Couldn't save – storage blocked");
+  if(any){const b=clone(draft);b.updated=Date.now();S.sessions[id]=b;if(S.deleted)delete S.deleted[id]}else if(S.sessions[id]){delete S.sessions[id];tomb(id)}
+  dirty=false;status(persist()?"Saved ✓":"Couldn't save – storage blocked");queueSync();
 }
+
+/* ---------- GitHub sync ---------- */
+function tomb(id){(S.deleted=S.deleted||{})[id]=Date.now()}
+const enc=t=>btoa(unescape(encodeURIComponent(t)));
+const dec=b=>decodeURIComponent(escape(atob(String(b).replace(/\s/g,""))));
+const syncOn=()=>!!(S.sync&&S.sync.repo&&S.sync.token);
+let syncT=null,syncing=false,syncAgain=false;
+function queueSync(){if(!syncOn())return;clearTimeout(syncT);syncT=setTimeout(syncNow,8000)}
+function smsg(t){const m=$("syncmsg");if(m)m.textContent=t}
+async function gh(method,body){
+  const r=await fetch(`https://api.github.com/repos/${S.sync.repo}/contents/data.json`,{method,cache:"no-store",headers:{Authorization:"Bearer "+S.sync.token,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28",...(body?{"Content-Type":"application/json"}:{})},body:body?JSON.stringify(body):undefined});
+  return r;
+}
+function mergeRemote(R){
+  if(!R||typeof R!=="object")return false;let ch=false;
+  const del=Object.assign({},R.deleted||{},S.deleted||{});for(const [k,v] of Object.entries(R.deleted||{}))if(!S.deleted||!S.deleted[k]||S.deleted[k]<v)del[k]=v;S.deleted=del;
+  for(const [id,s] of Object.entries(R.sessions||{})){
+    if(!s||!s.date||!s.day||!Array.isArray(s.ex))continue;
+    if(dirty&&id===sid())continue;
+    if(del[id]&&del[id]>=(s.updated||0))continue;
+    const cur=S.sessions[id];if(!cur||(s.updated||0)>(cur.updated||0)){S.sessions[id]=s;ch=true}
+  }
+  for(const [id,t] of Object.entries(del)){const cur=S.sessions[id];if(cur&&(cur.updated||0)<=t){delete S.sessions[id];ch=true}}
+  const bd=Object.assign({},R.bodyDel||{},S.bodyDel||{});S.bodyDel=bd;
+  for(const x of R.body||[]){if(!x||!x.d)continue;if(bd[x.d]&&bd[x.d]>=(x.u||0))continue;const c=S.body.find(y=>y.d===x.d);if(!c){S.body.push(x);ch=true}else if((x.u||0)>(c.u||0)){Object.assign(c,x);ch=true}}
+  const nb=S.body.filter(x=>!(bd[x.d]&&bd[x.d]>=(x.u||0)));if(nb.length!==S.body.length){S.body=nb;ch=true}
+  if(R.planText&&(R.planUpdated||0)>(S.planUpdated||0)&&confirmPlan(R.planText)){S.planText=R.planText;S.planUpdated=R.planUpdated;S.planVer=Math.max(+S.planVer||0,+R.planVer||0);PLAN=parsePlan(S.planText);ch=true}
+  return ch;
+}
+function payload(){return{app:"rocky-gym",version:2,updated:new Date().toISOString(),note:"Sessions keyed date_DAY. Weights in lb; plate-loaded machines/barbell logged per side; preacher bar = plates only. r2/w2 = right side on single-arm/leg lifts.",sessions:S.sessions,body:S.body,deleted:S.deleted||{},bodyDel:S.bodyDel||{},planText:S.planText,planUpdated:S.planUpdated||0,planVer:S.planVer||0}}
+async function syncNow(manual){
+  if(!syncOn())return;if(syncing){syncAgain=true;return}
+  syncing=true;clearTimeout(syncT);smsg("Syncing…");
+  try{
+    if(dirty)save();
+    let sha=null,remote=null;
+    const g=await gh("GET");
+    if(g.status===200){const j=await g.json();sha=j.sha;try{remote=JSON.parse(dec(j.content))}catch(e){remote=null}}
+    else if(g.status!==404)throw new Error(g.status===401?"Token rejected – check it or make a new one":g.status===403?"Token can't access that repo – give it Contents: Read and write":"GitHub error "+g.status);
+    const changed=mergeRemote(remote);if(changed){persist();if(!dirty){loadDraft();route()}}
+    const body=JSON.stringify(payload(),null,1);
+    const strip=o=>o?JSON.stringify(Object.assign({},o,{updated:0})):"";
+    if(!remote||strip(JSON.parse(body))!==strip(remote)){
+      let p=await gh("PUT",{message:"Sync "+new Date().toISOString().slice(0,16).replace("T"," "),content:enc(body),...(sha?{sha}:{})});
+      if(p.status===409||p.status===422){syncing=false;syncAgain=false;return syncNow(manual)}
+      if(!p.ok)throw new Error(p.status===404?"Repo not found – check the name":p.status===403?"Token can't write to that repo – give it Contents: Read and write":"GitHub error "+p.status);
+    }
+    S.sync.last=Date.now();persist();
+    smsg("Synced ✓ "+new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit"}));if(manual&&!dirty)status("Synced ✓");
+  }catch(e){smsg("Sync failed: "+(e.message||"no connection – will retry"))}
+  syncing=false;if(syncAgain){syncAgain=false;queueSync()}
+}
+$("syncsave").addEventListener("click",()=>{const repo=$("syncrepo").value.trim().replace(/^https?:\/\/github\.com\//,"").replace(/\.git$/,"").replace(/\/$/,""),token=$("synctoken").value.trim();
+  if(!/^[\w.-]+\/[\w.-]+$/.test(repo)){smsg("Repo should look like ND-jatt/rocky-gym-data");return}
+  if(!token&&!(S.sync&&S.sync.token)){smsg("Paste your GitHub token");return}
+  S.sync={repo,token:token||S.sync.token,last:S.sync?.last||0};persist();$("synctoken").value="";$("synctoken").placeholder="saved ✓ (paste to replace)";syncNow(true)});
+$("syncnow").addEventListener("click",()=>{if(!syncOn()){smsg("Add your repo and token first");return}syncNow(true)});
+$("syncoff").addEventListener("click",()=>{S.sync=null;persist();$("syncrepo").value="";$("synctoken").placeholder="github_pat_…";smsg("Sync turned off. Your data stays on this phone.")});
 
 /* ---------- copy for Claude ---------- */
 function sessionText(){
@@ -546,10 +618,10 @@ function renderBody(){
 }
 $("bsave").addEventListener("click",()=>{
   const d=$("bdate").value||today(),w=$("bw").value.replace(/[^\d.]/g,""),wa=$("bwaist").value.replace(/[^\d.]/g,"");if(!w&&!wa)return;
-  const ex=S.body.find(b=>b.d===d);if(ex){if(w)ex.w=w;if(wa)ex.waist=wa}else S.body.push({d,w,waist:wa});
-  persist();$("bw").value="";$("bwaist").value="";renderBody();
+  const ex=S.body.find(b=>b.d===d);if(ex){if(w)ex.w=w;if(wa)ex.waist=wa;ex.u=Date.now()}else S.body.push({d,w,waist:wa,u:Date.now()});if(S.bodyDel)delete S.bodyDel[d];
+  persist();queueSync();$("bw").value="";$("bwaist").value="";renderBody();
 });
-$("blist").addEventListener("click",e=>{const b=e.target.closest("[data-bdel]");if(!b)return;if(!b.dataset.armed){b.dataset.armed=1;b.textContent="Sure?";return}S.body=S.body.filter(x=>x.d!==b.dataset.bdel);persist();renderBody()});
+$("blist").addEventListener("click",e=>{const b=e.target.closest("[data-bdel]");if(!b)return;if(!b.dataset.armed){b.dataset.armed=1;b.textContent="Sure?";return}S.body=S.body.filter(x=>x.d!==b.dataset.bdel);(S.bodyDel=S.bodyDel||{})[b.dataset.bdel]=Date.now();persist();queueSync();renderBody()});
 
 /* ---------- render: history ---------- */
 function renderHistory(){
@@ -562,7 +634,7 @@ function renderHistory(){
 $("hist").addEventListener("click",e=>{
   const o=e.target.closest("[data-open]");if(o){const [d,k]=o.dataset.open.split("|");switchTo(d,k);location.hash="#log";return}
   const b=e.target.closest("[data-del]");if(!b)return;if(!b.dataset.armed){b.dataset.armed=1;b.textContent="Tap again to delete";return}
-  delete S.sessions[b.dataset.del];persist();if(b.dataset.del===sid())loadDraft();renderHistory();
+  delete S.sessions[b.dataset.del];tomb(b.dataset.del);persist();queueSync();if(b.dataset.del===sid())loadDraft();renderHistory();
 });
 
 /* ---------- more: backup, timer, plan ---------- */
@@ -586,11 +658,11 @@ const confirmPlan=t=>typeof t==="string"&&/^(MON|TUE|WED|THU|FRI|SAT|SUN)/im.tes
 $("restsec").addEventListener("change",e=>{S.rest=e.target.value==="auto"?"auto":+e.target.value;persist()});
 $("restauto").addEventListener("change",e=>{S.restAuto=+e.target.value;persist()});
 $("plansave").addEventListener("click",()=>{const t=$("plantext").value;if(!confirmPlan(t)){$("planmsg").textContent="Start with a day line like: MON | Push";return}
-  if(dirty)save();S.planText=t;PLAN=parsePlan(t);persist();loadDraft();$("planmsg").textContent="Split saved.";});
+  if(dirty)save();S.planText=t;S.planUpdated=Date.now();PLAN=parsePlan(t);persist();queueSync();loadDraft();$("planmsg").textContent="Split saved.";});
 $("planreset").addEventListener("click",e=>{const b=e.currentTarget;if(!b.dataset.armed){b.dataset.armed=1;b.textContent="Tap again to restore";return}
-  b.dataset.armed="";b.textContent="Restore default";S.planText=DEFAULT_PLAN;S.planVer=3;PLAN=parsePlan(DEFAULT_PLAN);$("plantext").value=DEFAULT_PLAN;persist();loadDraft();$("planmsg").textContent="Default split restored."});
+  b.dataset.armed="";b.textContent="Restore default";S.planText=DEFAULT_PLAN;S.planVer=3;S.planUpdated=Date.now();PLAN=parsePlan(DEFAULT_PLAN);$("plantext").value=DEFAULT_PLAN;persist();loadDraft();$("planmsg").textContent="Default split restored."});
 $("wipe").addEventListener("click",e=>{const b=e.currentTarget;if(!b.dataset.armed){b.dataset.armed=1;b.textContent="Tap again – this erases everything";return}
-  S.sessions={};S.body=[];persist();loadDraft();renderAll();b.dataset.armed="";b.textContent="Delete all data"});
+  Object.keys(S.sessions).forEach(tomb);S.body.forEach(x=>(S.bodyDel=S.bodyDel||{})[x.d]=Date.now());S.sessions={};S.body=[];persist();queueSync();loadDraft();renderAll();b.dataset.armed="";b.textContent="Delete all data"});
 
 /* ---------- routing ---------- */
 const VIEWS=["log","progress","body","history","more"];
@@ -611,10 +683,13 @@ window.addEventListener("pagehide",()=>{if(dirty)save()});
 /* ---------- start ---------- */
 if(!S.restSet){S.rest="auto";S.restSet=1;persist()}
 $("restsec").value=String(S.rest??"auto");$("restauto").value=String(S.restAuto??1);$("plantext").value=S.planText;
+if(S.sync){$("syncrepo").value=S.sync.repo||"";if(S.sync.token)$("synctoken").placeholder="saved ✓ (paste to replace)";smsg(S.sync.last?"Last synced "+new Date(S.sync.last).toLocaleString([],{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"")}
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")syncNow();else if(syncOn()&&!syncing)syncNow()});
 loadDraft();route();
+setTimeout(()=>syncNow(),1500);
 (async()=>{try{
   const r=await fetch("seed-nd.json?"+Date.now());if(!r.ok)return;const j=await r.json();let n=0;
-  for(const [id,s] of Object.entries(j.sessions||{})){if(!s||!s.date||!s.day||!Array.isArray(s.ex))continue;const cur=S.sessions[id];if(!cur){S.sessions[id]=s;n++}}
+  for(const [id,s] of Object.entries(j.sessions||{})){if(!s||!s.date||!s.day||!Array.isArray(s.ex))continue;if(S.deleted&&S.deleted[id])continue;const cur=S.sessions[id];if(!cur){S.sessions[id]=s;n++}}
   if(location.search)history.replaceState(null,"",location.pathname+location.hash);if(!n)return;if(dirty)save();persist();loadDraft();route();status(`Loaded ${n} past session${n===1?"":"s"} ✓`);
 }catch(e){}})();
 status(storeOK?(Object.keys(S.sessions).length?"Saved on this device":"Start logging – it saves as you type"):"Storage blocked – turn off private browsing");
