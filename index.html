@@ -6,10 +6,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ND's Gym">
+<meta name="apple-mobile-web-app-title" content="Rocky Gym">
 <meta name="theme-color" content="#161616">
-<title>ND's Gym Tracker</title>
-<meta name="description" content="ND's Gym Tracker – log sets and reps, get warm-up and working weight recommendations, track PRs, strength progress and bodyweight.">
+<title>Rocky Gym by ND</title>
+<meta name="description" content="Rocky Gym by ND – log sets and reps, get warm-up and working weight recommendations, track PRs, strength progress and bodyweight.">
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
@@ -95,7 +95,7 @@ nav a.on{color:#fff;box-shadow:inset 0 3px 0 var(--red)}
 <body>
 <header>
   <div class="top">
-    <h1>ND'S GYM <span>TRACKER</span></h1>
+    <h1>ROCKY <span>GYM</span> <small style="font:600 15px Barlow,sans-serif;color:#bdbdbd;letter-spacing:.3px">by ND</small></h1>
     <label class="date" id="datewrap">Session date<input type="date" id="date"></label>
   </div>
   <div class="days" id="days" role="group" aria-label="Training day"></div>
@@ -530,7 +530,7 @@ $("hist").addEventListener("click",e=>{
 $("export").addEventListener("click",()=>{
   if(dirty)save();
   const blob=new Blob([JSON.stringify({app:"lift-log",version:1,exported:new Date().toISOString(),sessions:S.sessions,body:S.body,planText:S.planText},null,1)],{type:"application/json"});
-  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="nds-gym-tracker-backup-"+today()+".json";document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="rocky-gym-backup-"+today()+".json";document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);
   $("bkmsg").textContent="Backup downloaded. Keep it somewhere safe, like iCloud Drive, Google Drive or email it to yourself.";
 });
 $("import").addEventListener("change",async e=>{
