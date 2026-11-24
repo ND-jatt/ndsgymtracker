@@ -109,6 +109,12 @@ nav a.on{color:#fff;box-shadow:inset 0 3px 0 var(--red)}
       <h3 style="font-size:20px;margin-bottom:6px">Notes</h3>
       <textarea id="notes" placeholder="How it felt, pain, PRs, swaps…"></textarea>
     </div>
+    <div class="card">
+      <h3 style="font-size:20px;margin-bottom:6px">Ask Claude</h3>
+      <p class="note">Copies today's workout with last time's numbers. Paste it in your Claude chat for tips.</p>
+      <div class="acts"><button class="btn pri" id="copyai" type="button">Copy workout for Claude</button></div>
+      <textarea id="copybox" readonly style="display:none;margin-top:8px;min-height:160px;font:13px/1.45 ui-monospace,Menlo,monospace"></textarea>
+    </div>
   </section>
 
   <section class="view" id="v-progress">
@@ -409,6 +415,27 @@ function save(){
   if(any){const b=clone(draft);b.updated=Date.now();S.sessions[id]=b}else delete S.sessions[id];
   dirty=false;status(persist()?"Saved ✓":"Couldn't save – storage blocked");
 }
+
+/* ---------- copy for Claude ---------- */
+function sessionText(){
+  const lines=[`Rocky Gym – ${FULL[KEYS.indexOf(day)]} (${PLAN[day].n}), ${nice(date)}`];
+  draft.ex.forEach((e,i)=>{const slot=PLAN[day].x[i];const p=isPlank(e.n),u=isUni(e.n),L=lastFor(e.n),R=rec(e.n,slot?slot.t:"2×6-8");
+    const done=e.sets.filter(filled);
+    lines.push(`\n${e.n}${slot?" ("+slot.t+")":""}`);
+    lines.push("  Today: "+(done.length?done.map(t=>fmtSet(t,p,u)).join(", "):"not done"));
+    if(L)lines.push(`  Last (${short(L.s.date)}): `+L.e.sets.filter(filled).map(t=>fmtSet(t,p,u)).join(", "));
+    if(R&&R.W>0)lines.push(`  App target: ${R.W} lb × ${R.lo===R.hi?R.lo:R.lo+"-"+R.hi}`);
+  });
+  if(draft.notes.trim())lines.push("\nNotes: "+draft.notes.trim());
+  lines.push("\n(Weights: plate-loaded machines/barbell = per side; preacher bar = plates only.)");
+  return lines.join("\n");
+}
+$("copyai").addEventListener("click",async()=>{
+  if(dirty)save();const t=sessionText(),box=$("copybox");box.value=t;
+  try{await navigator.clipboard.writeText(t);$("copyai").textContent="Copied ✓ – paste it in Claude";box.style.display="none"}
+  catch(e){box.style.display="block";box.focus();box.select();$("copyai").textContent="Select all & copy the text below"}
+  setTimeout(()=>{$("copyai").textContent="Copy workout for Claude"},4000);
+});
 
 /* ---------- rest timer ---------- */
 let tEnd=0,tInt=null,actx=null;
