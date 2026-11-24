@@ -435,7 +435,13 @@ $("list").addEventListener("input",e=>{
 });
 $("list").addEventListener("change",e=>{const t=e.target;
   if(t.tagName==="SELECT"){draft.ex[+t.dataset.i].n=t.value;queueSave();renderLog();return}
-  if(t.tagName==="INPUT"&&/^r/.test(t.dataset.f)&&has(t.value)&&+S.restAuto)startTimer(+S.rest||90);
+  if(t.tagName==="INPUT"&&/^r/.test(t.dataset.f)&&has(t.value)){
+    const ex=draft.ex[+t.dataset.i],j=+t.dataset.j,set=ex.sets[j];
+    if(isUni(ex.n)&&!(has(set.r)&&has(set.r2)))return; // switching arms/legs: no rest yet
+    const more=ex.sets.some((x,k)=>k>j&&!filled(x)); // another set of this exercise still to do
+    if(!more){stopTimer();return}
+    if(+S.restAuto)startTimer(+S.rest||90);
+  }
 });
 $("list").addEventListener("click",e=>{
   const a=e.target.closest("[data-add]"),r=e.target.closest("[data-rm]");
