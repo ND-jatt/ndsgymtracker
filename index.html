@@ -193,6 +193,14 @@ nav a.on{color:#fff;box-shadow:inset 0 3px 0 var(--red)}
       </div>
     </div>
     <div class="card">
+      <h3 style="font-size:22px;margin-bottom:6px">Schedule</h3>
+      <p class="note">Missed a session? Push the split back a day. Each day after it moves forward one, and the week's last day (optional Sunday) drops off so next Monday is Push again. That's your rest day.</p>
+      <div id="schedweek" style="margin:8px 0"></div>
+      <div class="grid2"><label class="f">Day you skipped<input class="in" type="date" id="skipdate"></label></div>
+      <div class="acts"><button class="btn pri" id="skipbtn" type="button">Push split back 1 day</button><button class="btn" id="schedreset" type="button">Back to normal weekdays</button></div>
+      <p class="note" id="schedmsg"></p>
+    </div>
+    <div class="card">
       <h3 style="font-size:22px;margin-bottom:6px">Edit your split</h3>
       <p class="note">One line per day header (<b>MON | Push</b>), then one line per exercise: options split by <b>/</b>, then <b>|</b> and the target (<b>2×6-8</b>). The first number is how many set rows you get. Your history is matched by exercise name, so keep names the same when you reorder.</p>
       <textarea id="plantext" style="min-height:360px;font:14px/1.5 ui-monospace,Menlo,monospace"></textarea>
@@ -290,6 +298,12 @@ let storeOK=true;
 try{const raw=localStorage.getItem(KEY);if(raw)S=Object.assign(S,JSON.parse(raw))}catch(e){storeOK=false}
 const persist=()=>{try{localStorage.setItem(KEY,JSON.stringify(S));return true}catch(e){return false}};
 
+/* ---------- schedule overrides (skipped days push the split back) ---------- */
+// S.sched maps a date to the split day trained on it, e.g. {"2026-11-25":"TUE"}. Dates not listed use their weekday.
+if(!S.schedUpdated){S.sched={"2026-11-25":"TUE","2026-11-26":"WED","2026-11-27":"THU","2026-11-28":"FRI","2026-11-29":"SAT"};S.schedUpdated=1795579200000;persist()} // skipped Tue Nov 24
+const dayFor=d=>(S.sched&&KEYS.includes(S.sched[d])&&S.sched[d])||KEYS[dow(d)];
+const addDays=(d,n)=>{const x=parseD(d);x.setDate(x.getDate()+n);return ymd(x)};
+
 /* ---------- plan ---------- */
 function parsePlan(text){
   const P={};let cur=null;
@@ -330,7 +344,7 @@ const fmtSet=(t,p,u)=>u?"L "+one(t.w,t.r,p)+" / R "+one(t.w2,t.r2,p):one(t.w,t.r
 const sorted=()=>Object.values(S.sessions).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:KEYS.indexOf(a.day)-KEYS.indexOf(b.day));
 
 /* ---------- log state ---------- */
-let date=today(),day=KEYS[dow(date)],draft=null,dirty=false,timer=null;
+let date=today(),day=dayFor(date),draft=null,dirty=false,timer=null;
 const sid=()=>date+"_"+day;
 const before=s=>!(s.date>date||(s.date===date&&s.day===day));
 
@@ -390,7 +404,7 @@ function renderDays(){
 }
 function renderLog(){
   renderDays();
-  $("dayname").textContent=FULL[KEYS.indexOf(day)]+" – "+PLAN[day].n;
+  $("dayname").textContent=day===KEYS[dow(date)]?FULL[KEYS.indexOf(day)]+" – "+PLAN[day].n:PLAN[day].n+" – "+FULL[dow(date)]+" ("+LBL[KEYS.indexOf(day)]+"'s workout)";
   $("notes").value=draft.notes||"";
   if(!draft.ex.length){$("list").innerHTML=`<div class="card"><p class="empty">Nothing planned for this day. Add exercises under More → Edit your split.</p></div>`;return}
   const seen=new Set();
@@ -442,6 +456,7 @@ async function gh(method,body){
   const r=await fetch(`https://api.github.com/repos/${S.sync.repo}/contents/data.json`,{method,cache:"no-store",headers:{Authorization:"Bearer "+S.sync.token,Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28",...(body?{"Content-Type":"application/json"}:{})},body:body?JSON.stringify(body):undefined});
   return r;
 }
+let schedCh=false;
 function mergeRemote(R){
   if(!R||typeof R!=="object")return false;let ch=false;
   const del=Object.assign({},R.deleted||{},S.deleted||{});for(const [k,v] of Object.entries(R.deleted||{}))if(!S.deleted||!S.deleted[k]||S.deleted[k]<v)del[k]=v;S.deleted=del;
@@ -455,10 +470,11 @@ function mergeRemote(R){
   const bd=Object.assign({},R.bodyDel||{},S.bodyDel||{});S.bodyDel=bd;
   for(const x of R.body||[]){if(!x||!x.d)continue;if(bd[x.d]&&bd[x.d]>=(x.u||0))continue;const c=S.body.find(y=>y.d===x.d);if(!c){S.body.push(x);ch=true}else if((x.u||0)>(c.u||0)){Object.assign(c,x);ch=true}}
   const nb=S.body.filter(x=>!(bd[x.d]&&bd[x.d]>=(x.u||0)));if(nb.length!==S.body.length){S.body=nb;ch=true}
+  if(R.sched&&typeof R.sched==="object"&&(R.schedUpdated||0)>(S.schedUpdated||0)){S.sched=R.sched;S.schedUpdated=R.schedUpdated;ch=true;schedCh=true}
   if(R.planText&&(R.planUpdated||0)>(S.planUpdated||0)&&confirmPlan(R.planText)){S.planText=R.planText;S.planUpdated=R.planUpdated;S.planVer=Math.max(+S.planVer||0,+R.planVer||0);PLAN=parsePlan(S.planText);ch=true}
   return ch;
 }
-function payload(){return{app:"rocky-gym",version:2,updated:new Date().toISOString(),note:"Sessions keyed date_DAY. Weights in lb; plate-loaded machines/barbell logged per side; preacher bar = plates only. r2/w2 = right side on single-arm/leg lifts.",sessions:S.sessions,body:S.body,deleted:S.deleted||{},bodyDel:S.bodyDel||{},planText:S.planText,planUpdated:S.planUpdated||0,planVer:S.planVer||0}}
+function payload(){return{app:"rocky-gym",version:2,updated:new Date().toISOString(),note:"Sessions keyed date_DAY. Weights in lb; plate-loaded machines/barbell logged per side; preacher bar = plates only. r2/w2 = right side on single-arm/leg lifts.",sessions:S.sessions,body:S.body,deleted:S.deleted||{},bodyDel:S.bodyDel||{},planText:S.planText,planUpdated:S.planUpdated||0,planVer:S.planVer||0,sched:S.sched||{},schedUpdated:S.schedUpdated||0}}
 async function syncNow(manual){
   if(!syncOn())return;if(syncing){syncAgain=true;return}
   syncing=true;clearTimeout(syncT);smsg("Syncing…");
@@ -468,7 +484,7 @@ async function syncNow(manual){
     const g=await gh("GET");
     if(g.status===200){const j=await g.json();sha=j.sha;try{remote=JSON.parse(dec(j.content))}catch(e){remote=null}}
     else if(g.status!==404)throw new Error(g.status===401?"Token rejected – check it or make a new one":g.status===403?"Token can't access that repo – give it Contents: Read and write":"GitHub error "+g.status);
-    const changed=mergeRemote(remote);if(changed){persist();if(!dirty){loadDraft();route()}}
+    schedCh=false;const changed=mergeRemote(remote);if(changed){persist();if(!dirty){if(schedCh&&!S.sessions[sid()])day=dayFor(date);loadDraft();route()}}
     const body=JSON.stringify(payload(),null,1);
     const strip=o=>o?JSON.stringify(Object.assign({},o,{updated:0})):"";
     if(!remote||strip(JSON.parse(body))!==strip(remote)){
@@ -490,7 +506,7 @@ $("syncoff").addEventListener("click",()=>{S.sync=null;persist();$("syncrepo").v
 
 /* ---------- copy for Claude ---------- */
 function sessionText(){
-  const lines=[`Rocky Gym – ${FULL[KEYS.indexOf(day)]} (${PLAN[day].n}), ${nice(date)}`];
+  const lines=[`Rocky Gym – ${FULL[KEYS.indexOf(day)]} (${PLAN[day].n}), ${nice(date)}${day!==KEYS[dow(date)]?" [split pushed back]":""}`];
   draft.ex.forEach((e,i)=>{const slot=PLAN[day].x[i];const p=isPlank(e.n),u=isUni(e.n),L=lastFor(e.n),R=rec(e.n,slot?slot.t:"2×6-8");
     const done=e.sets.filter(filled);
     lines.push(`\n${e.n}${slot?" ("+slot.t+")":""}`);
@@ -522,8 +538,10 @@ $("tstop").addEventListener("click",stopTimer);
 
 /* ---------- log events ---------- */
 function switchTo(d,k){if(dirty)save();date=d;day=k;loadDraft();renderLog()}
-$("days").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const k=KEYS.indexOf(b.dataset.k),t=today(),c=dow(t),n=parseD(t);n.setDate(n.getDate()+((k-c+7)%7));switchTo(ymd(n),b.dataset.k)});
-$("date").addEventListener("change",e=>{if(e.target.value)switchTo(e.target.value,KEYS[dow(e.target.value)])});
+$("days").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const k=b.dataset.k,t=today();
+  for(let i=0;i<7;i++){const d=addDays(t,i);if(dayFor(d)===k)return switchTo(d,k)}
+  switchTo(t,k)}); // day dropped from this week's schedule: log it today
+$("date").addEventListener("change",e=>{if(e.target.value)switchTo(e.target.value,dayFor(e.target.value))});
 $("notes").addEventListener("input",e=>{draft.notes=e.target.value;queueSave()});
 $("list").addEventListener("input",e=>{
   const t=e.target;if(t.tagName!=="INPUT")return;
@@ -666,13 +684,34 @@ $("wipe").addEventListener("click",e=>{const b=e.currentTarget;if(!b.dataset.arm
 
 /* ---------- routing ---------- */
 const VIEWS=["log","progress","body","history","more"];
+/* ---------- schedule UI ---------- */
+function renderSched(){
+  const t=today(),ws=addDays(t,-dow(t));
+  if(!$("skipdate").value)$("skipdate").value=t;
+  $("schedweek").innerHTML=`<table><tbody>${KEYS.map((_,i)=>{const d=addDays(ws,i),k=dayFor(d),mv=k!==KEYS[i];
+    return `<tr><td>${d===t?"<b>"+nice(d)+" (today)</b>":nice(d)}</td><td style="white-space:normal">${esc(PLAN[k].n)}${mv?` <span class="tgt">(${LBL[KEYS.indexOf(k)]}'s)</span>`:""}</td></tr>`}).join("")}</tbody></table>`;
+}
+$("skipbtn").addEventListener("click",()=>{
+  const x=$("skipdate").value;if(!x){$("schedmsg").textContent="Pick the day you skipped.";return}
+  const k0=dow(x);if(k0===6){$("schedmsg").textContent="Sunday is optional, so nothing needs to move.";return}
+  const moves=[];for(let i=k0+1;i<=6;i++){const d=addDays(x,i-k0);moves.push([d,dayFor(addDays(d,-1))])}
+  const logged=moves.find(([d])=>Object.values(S.sessions).some(s=>s.date===d));
+  if(logged){$("schedmsg").textContent="You already logged a session on "+nice(logged[0])+", so the split wasn't moved.";return}
+  if(dirty)save();S.sched=Object.assign({},S.sched||{});moves.forEach(([d,k])=>S.sched[d]=k);S.schedUpdated=Date.now();persist();queueSync();
+  if(!S.sessions[sid()])day=dayFor(date);loadDraft();renderSched();
+  $("schedmsg").textContent="Done. "+nice(moves[0][0])+" is now "+PLAN[moves[0][1]].n+".";
+});
+$("schedreset").addEventListener("click",e=>{const b=e.currentTarget;if(!b.dataset.armed){b.dataset.armed=1;b.textContent="Tap again to reset";return}
+  b.dataset.armed="";b.textContent="Back to normal weekdays";const t=today(),o={};for(const [d,k] of Object.entries(S.sched||{}))if(d<t)o[d]=k;
+  if(dirty)save();S.sched=o;S.schedUpdated=Date.now();persist();queueSync();if(!S.sessions[sid()])day=dayFor(date);loadDraft();renderSched();$("schedmsg").textContent="Back to normal weekdays from today.";
+});
 function route(){
   const v=VIEWS.includes(location.hash.slice(1))?location.hash.slice(1):"log";
   if(dirty&&v!=="log")save();
   VIEWS.forEach(x=>$("v-"+x).classList.toggle("on",x===v));
   document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("on",a.dataset.v===v));
   $("days").style.display=v==="log"?"":"none";$("datewrap").style.visibility=v==="log"?"":"hidden";
-  if(v==="log")renderLog();if(v==="progress")renderProgress();if(v==="body")renderBody();if(v==="history")renderHistory();
+  if(v==="log")renderLog();if(v==="progress")renderProgress();if(v==="body")renderBody();if(v==="history")renderHistory();if(v==="more")renderSched();
   window.scrollTo(0,0);
 }
 function renderAll(){route()}
