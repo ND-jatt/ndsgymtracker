@@ -42,7 +42,9 @@ main{max-width:760px;margin:0 auto;padding:18px max(4vw,14px) 40px}
 .xhead{font-size:24px;margin:22px 0 10px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .xcard{border-left:4px solid var(--red)}
 .also{margin:8px 0 2px;padding:8px 10px;border-radius:8px;border:1px dashed var(--red);font-size:14px;color:var(--mute)}.also b{color:var(--ink);font-weight:600}
-.drop{margin:-2px 0 8px 44px;font-size:14px;color:var(--ink)}.drop span{color:var(--mute)}
+.dropr{margin-top:4px}.dropr .sn{font-size:16px;color:var(--mute)}.dropr input{min-height:40px;font-size:16px}
+.dx{width:40px;height:40px;justify-self:center;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--down);font-size:16px;cursor:pointer}
+.dbtn{margin:4px 0 2px 52px;font:600 13px Barlow,sans-serif;color:var(--mute);background:transparent;border:1px dashed var(--line);border-radius:6px;padding:4px 10px;min-height:32px;cursor:pointer}
 .addrow{display:flex;gap:8px}.addrow .in{flex:1;min-width:0}
 .hl{outline:3px solid var(--red);outline-offset:2px}
 .ch{display:flex;justify-content:space-between;gap:10px;align-items:start}
@@ -357,7 +359,7 @@ const vol1=t=>(+t.w||0)*(+t.r||0)+(+t.w2||0)*(+t.r2||0);
 const vol=sets=>sets.reduce((a,t)=>a+vol1(t)+(t.d||[]).reduce((b,x)=>b+vol1(x),0),0);
 const one=(w,r,p)=>!has(r)?"–":(p?(has(w)?w+" lb × ":"")+r+"s":(!has(w)?"BW":w)+"×"+r);
 const fmt1=(t,p,u)=>u?"L "+one(t.w,t.r,p)+" / R "+one(t.w2,t.r2,p):one(t.w,t.r,p);
-const fmtSet=(t,p,u)=>[t,...(t.d||[])].map(x=>fmt1(x,p,u)).join(" → "); // drop sets: "40×4 → 35×3" = one working set
+const fmtSet=(t,p,u)=>[t,...(t.d||[]).filter(filled)].map(x=>fmt1(x,p,u)).join(" → "); // drop sets: "40×4 → 35×3" = one working set
 const sorted=()=>Object.values(S.sessions).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:KEYS.indexOf(a.day)-KEYS.indexOf(b.day));
 
 /* ---------- log state ---------- */
@@ -456,7 +458,13 @@ function renderLog(){
       <input inputmode="decimal" data-i="${i}" data-j="${j}" data-f="${W}" value="${esc(t[W])}" placeholder="${pv&&has(pv[W])?esc(pv[W]):"lb"}" aria-label="Set ${lab} weight">
       <input inputmode="numeric" data-i="${i}" data-j="${j}" data-f="${Rr}" value="${esc(t[Rr])}" placeholder="${pv&&has(pv[Rr])?esc(pv[Rr]):p?"sec":"reps"}" aria-label="Set ${lab} ${p?"seconds":"reps"}">
       <span class="d ${c}" id="d${i}_${j}_${k||"x"}">${txt}${isPR?'<span class="pr">PR</span>':""}</span></div>`};
-    const rows=cur.sets.map((t,j)=>{const pv=L&&L.e.sets[j],dr=(t.d||[]).length?`<div class="drop">↳ drop set: ${esc(t.d.map(x=>fmt1(x,p,u)).join(" → "))} <span>(part of set ${j+1})</span></div>`:"";return (u?`<div class="pair">${cell(t,pv,j,"",(j+1)+"L")}${cell(t,pv,j,"2",(j+1)+"R")}</div>`:cell(t,pv,j,"",j+1))+dr}).join("");
+    // drop sets: any number per set, each one belongs to the set above it and counts as part of that one working set
+    const dcell=(x,j,k,s2,lab,del)=>`<div class="row dropr"><span class="sn">${lab}</span>
+      <input inputmode="decimal" data-i="${i}" data-j="${j}" data-k="${k}" data-f="w${s2}" value="${esc(x["w"+s2])}" placeholder="lb" aria-label="Set ${j+1} drop ${k+1} weight">
+      <input inputmode="numeric" data-i="${i}" data-j="${j}" data-k="${k}" data-f="r${s2}" value="${esc(x["r"+s2])}" placeholder="reps" aria-label="Set ${j+1} drop ${k+1} reps">
+      ${del?`<button type="button" class="dx" data-ddel="${i}|${j}|${k}" aria-label="Remove this drop">✕</button>`:"<span></span>"}</div>`;
+    const drops=(t,j)=>(t.d||[]).map((x,k)=>u?dcell(x,j,k,"","↳L",true)+dcell(x,j,k,"2","↳R",false):dcell(x,j,k,"","↳",true)).join("")+`<button type="button" class="dbtn" data-drop="${i}|${j}">+ Drop</button>`;
+    const rows=cur.sets.map((t,j)=>{const pv=L&&L.e.sets[j],dr=drops(t,j);return (u?`<div class="pair">${cell(t,pv,j,"",(j+1)+"L")}${cell(t,pv,j,"2",(j+1)+"R")}</div>`:cell(t,pv,j,"",j+1))+dr}).join("");
     let sum="";
     if(L&&!p){const a=vol(cur.sets),b=vol(L.e.sets);if(a>0&&b>0){const d=a-b;sum=`<div class="sum d ${d>0?"up":d<0?"dn":"eq"}" style="text-align:left">Total volume ${a.toLocaleString()} lb vs ${b.toLocaleString()} last time (${d>=0?"+":""}${d.toLocaleString()})</div>`}}
     const alsoBox=`<div id="also${i}">${alsoHTML(also[i])}</div>`;
@@ -580,7 +588,9 @@ $("date").addEventListener("change",e=>{if(e.target.value)switchTo(e.target.valu
 $("notes").addEventListener("input",e=>{draft.notes=e.target.value;queueSave()});
 $("list").addEventListener("input",e=>{
   const t=e.target;if(t.tagName!=="INPUT")return;
-  const i=+t.dataset.i,j=+t.dataset.j,f=t.dataset.f;draft.ex[i].sets[j][f]=t.value.replace(/[^\d.]/g,"");
+  const i=+t.dataset.i,j=+t.dataset.j,f=t.dataset.f;
+  if(t.dataset.k!=null){draft.ex[i].sets[j].d[+t.dataset.k][f]=t.value.replace(/[^\d.]/g,"");refreshAlso(i);queueSave();return}
+  draft.ex[i].sets[j][f]=t.value.replace(/[^\d.]/g,"");
   const k=/2$/.test(f)?"2":"",L=lastFor(draft.ex[i].n),[c,txt]=delta(draft.ex[i].sets[j],L&&L.e.sets[j],k),d=$("d"+i+"_"+j+"_"+(k||"x"));
   const pb=bestBefore(draft.ex[i].n),st=draft.ex[i].sets[j],isPR=pb>0&&e1(st["w"+k],st["r"+k])>pb+0.01;
   d.className="d "+c;d.innerHTML=txt+(isPR?'<span class="pr">PR</span>':"");
@@ -589,7 +599,7 @@ $("list").addEventListener("input",e=>{
 });
 $("list").addEventListener("change",e=>{const t=e.target;
   if(t.tagName==="SELECT"){swapOption(+t.dataset.i,t.value);return}
-  if(t.tagName==="INPUT"&&/^r/.test(t.dataset.f)&&has(t.value)){
+  if(t.tagName==="INPUT"&&t.dataset.k==null&&/^r/.test(t.dataset.f)&&has(t.value)){
     const ex=draft.ex[+t.dataset.i],j=+t.dataset.j,set=ex.sets[j];
     if(isUni(ex.n)&&!(has(set.r)&&has(set.r2)))return; // switching arms/legs: no rest yet
     const more=ex.sets.some((x,k)=>k>j&&!filled(x)); // another set of this exercise still to do
@@ -601,6 +611,11 @@ $("list").addEventListener("click",e=>{
   const a=e.target.closest("[data-add]"),r=e.target.closest("[data-rm]");
   if(a){const s=draft.ex[+a.dataset.add].sets,l=s[s.length-1];s.push({w:l?.w||"",r:"",w2:l?.w2||"",r2:""});queueSave();renderLog()}
   if(r){draft.ex[+r.dataset.rm].sets.pop();queueSave();renderLog()}
+  const da=e.target.closest("[data-drop]");
+  if(da){const [a,b]=da.dataset.drop.split("|").map(Number),st=draft.ex[a].sets[b];(st.d=st.d||[]).push(isUni(draft.ex[a].n)?{w:"",r:"",w2:"",r2:""}:{w:"",r:""});queueSave();renderLog();
+    const n=document.querySelector(`#list input[data-i="${a}"][data-j="${b}"][data-k="${st.d.length-1}"]`);if(n)n.focus();return}
+  const dd=e.target.closest("[data-ddel]");
+  if(dd){const [a,b,k]=dd.dataset.ddel.split("|").map(Number),st=draft.ex[a].sets[b];st.d.splice(k,1);if(!st.d.length)delete st.d;queueSave();renderLog();return}
   const x=e.target.closest("[data-xrm]");
   if(x){if(!x.dataset.armed){x.dataset.armed=1;x.textContent="Tap again to remove";return}draft.ex.splice(+x.dataset.xrm,1);queueSave();renderLog()}
 });
