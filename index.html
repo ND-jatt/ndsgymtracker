@@ -39,6 +39,8 @@ main{max-width:760px;margin:0 auto;padding:18px max(4vw,14px) 40px}
 .view>h2{margin-bottom:12px}
 #status{font-size:13px;color:var(--mute)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.xhead{font-size:24px;margin:22px 0 10px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.xcard{border-left:4px solid var(--red)}
 .ch{display:flex;justify-content:space-between;gap:10px;align-items:start}
 .ch h3{font-size:22px}
 .tgt{font:600 15px "Barlow Condensed",sans-serif;color:var(--mute);white-space:nowrap}
@@ -430,7 +432,8 @@ function renderLog(){
     const rows=cur.sets.map((t,j)=>{const pv=L&&L.e.sets[j];return u?`<div class="pair">${cell(t,pv,j,"",(j+1)+"L")}${cell(t,pv,j,"2",(j+1)+"R")}</div>`:cell(t,pv,j,"",j+1)}).join("");
     let sum="";
     if(L&&!p){const a=vol(cur.sets),b=vol(L.e.sets);if(a>0&&b>0){const d=a-b;sum=`<div class="sum d ${d>0?"up":d<0?"dn":"eq"}" style="text-align:left">Total volume ${a.toLocaleString()} lb vs ${b.toLocaleString()} last time (${d>=0?"+":""}${d.toLocaleString()})</div>`}}
-    return `<div class="card"><div class="ch"><h3>${slot.o.length>1?"Pick one":esc(cur.n)}${PLAN[day].x[i]?"":" <span class=\"tgt\">(not in split)</span>"}</h3><span class="tgt">${esc(slot.t)}</span></div>${head}
+    const extra=!PLAN[day].x[i],xh=extra&&i===PLAN[day].x.length?`<h2 class="xhead">Extras today <span class="tgt">only saved for this date</span></h2>`:"";
+    return `${xh}<div class="card${extra?" xcard":""}"><div class="ch"><h3>${slot.o.length>1?"Pick one":esc(cur.n)}</h3><span class="tgt">${extra?"extra":esc(slot.t)}</span></div>${head}
     ${wu||wk?`<div class="rec">${wu}${wk}</div>`:""}
     <div class="last">${last}</div>
     <div class="row h"><span>Set</span><span>Weight (lb)</span><span>${p?"Seconds":"Reps"}</span><span>vs last</span></div>
