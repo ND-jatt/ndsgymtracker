@@ -42,6 +42,7 @@ main{max-width:760px;margin:0 auto;padding:18px max(4vw,14px) 40px}
 .xhead{font-size:24px;margin:22px 0 10px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .xcard{border-left:4px solid var(--red)}
 .also{margin:8px 0 2px;padding:8px 10px;border-radius:8px;border:1px dashed var(--red);font-size:14px;color:var(--mute)}.also b{color:var(--ink);font-weight:600}
+.drop{margin:-2px 0 8px 44px;font-size:14px;color:var(--ink)}.drop span{color:var(--mute)}
 .addrow{display:flex;gap:8px}.addrow .in{flex:1;min-width:0}
 .hl{outline:3px solid var(--red);outline-offset:2px}
 .ch{display:flex;justify-content:space-between;gap:10px;align-items:start}
@@ -352,9 +353,11 @@ const restFor=n=>S.rest==="auto"||S.rest==null?(isCompound(n)?150:90):(+S.rest||
 const rnd=(x,i)=>Math.max(i,Math.round(x/i)*i);
 const e1=(w,r)=>{w=+w||0;r=+r||0;return w>0&&r>0&&r<=20?w*(1+r/30):0};
 const setBest=t=>Math.max(e1(t.w,t.r),e1(t.w2,t.r2));
-const vol=sets=>sets.reduce((a,t)=>a+(+t.w||0)*(+t.r||0)+(+t.w2||0)*(+t.r2||0),0);
+const vol1=t=>(+t.w||0)*(+t.r||0)+(+t.w2||0)*(+t.r2||0);
+const vol=sets=>sets.reduce((a,t)=>a+vol1(t)+(t.d||[]).reduce((b,x)=>b+vol1(x),0),0);
 const one=(w,r,p)=>!has(r)?"–":(p?(has(w)?w+" lb × ":"")+r+"s":(!has(w)?"BW":w)+"×"+r);
-const fmtSet=(t,p,u)=>u?"L "+one(t.w,t.r,p)+" / R "+one(t.w2,t.r2,p):one(t.w,t.r,p);
+const fmt1=(t,p,u)=>u?"L "+one(t.w,t.r,p)+" / R "+one(t.w2,t.r2,p):one(t.w,t.r,p);
+const fmtSet=(t,p,u)=>[t,...(t.d||[])].map(x=>fmt1(x,p,u)).join(" → "); // drop sets: "40×4 → 35×3" = one working set
 const sorted=()=>Object.values(S.sessions).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:KEYS.indexOf(a.day)-KEYS.indexOf(b.day));
 
 /* ---------- log state ---------- */
@@ -453,7 +456,7 @@ function renderLog(){
       <input inputmode="decimal" data-i="${i}" data-j="${j}" data-f="${W}" value="${esc(t[W])}" placeholder="${pv&&has(pv[W])?esc(pv[W]):"lb"}" aria-label="Set ${lab} weight">
       <input inputmode="numeric" data-i="${i}" data-j="${j}" data-f="${Rr}" value="${esc(t[Rr])}" placeholder="${pv&&has(pv[Rr])?esc(pv[Rr]):p?"sec":"reps"}" aria-label="Set ${lab} ${p?"seconds":"reps"}">
       <span class="d ${c}" id="d${i}_${j}_${k||"x"}">${txt}${isPR?'<span class="pr">PR</span>':""}</span></div>`};
-    const rows=cur.sets.map((t,j)=>{const pv=L&&L.e.sets[j];return u?`<div class="pair">${cell(t,pv,j,"",(j+1)+"L")}${cell(t,pv,j,"2",(j+1)+"R")}</div>`:cell(t,pv,j,"",j+1)}).join("");
+    const rows=cur.sets.map((t,j)=>{const pv=L&&L.e.sets[j],dr=(t.d||[]).length?`<div class="drop">↳ drop set: ${esc(t.d.map(x=>fmt1(x,p,u)).join(" → "))} <span>(part of set ${j+1})</span></div>`:"";return (u?`<div class="pair">${cell(t,pv,j,"",(j+1)+"L")}${cell(t,pv,j,"2",(j+1)+"R")}</div>`:cell(t,pv,j,"",j+1))+dr}).join("");
     let sum="";
     if(L&&!p){const a=vol(cur.sets),b=vol(L.e.sets);if(a>0&&b>0){const d=a-b;sum=`<div class="sum d ${d>0?"up":d<0?"dn":"eq"}" style="text-align:left">Total volume ${a.toLocaleString()} lb vs ${b.toLocaleString()} last time (${d>=0?"+":""}${d.toLocaleString()})</div>`}}
     const alsoBox=`<div id="also${i}">${alsoHTML(also[i])}</div>`;
