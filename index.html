@@ -41,6 +41,9 @@ main{max-width:760px;margin:0 auto;padding:18px max(4vw,14px) 40px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
 .xhead{font-size:24px;margin:22px 0 10px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .xcard{border-left:4px solid var(--red)}
+.also{margin:8px 0 2px;padding:8px 10px;border-radius:8px;border:1px dashed var(--red);font-size:14px;color:var(--mute)}.also b{color:var(--ink);font-weight:600}
+.addrow{display:flex;gap:8px}.addrow .in{flex:1;min-width:0}
+.hl{outline:3px solid var(--red);outline-offset:2px}
 .ch{display:flex;justify-content:space-between;gap:10px;align-items:start}
 .ch h3{font-size:22px}
 .tgt{font:600 15px "Barlow Condensed",sans-serif;color:var(--mute);white-space:nowrap}
@@ -107,6 +110,13 @@ nav a.on{color:#fff;box-shadow:inset 0 3px 0 var(--red)}
   <section class="view" id="v-log">
     <div class="dayhead"><h2 id="dayname"></h2><span id="status"></span></div>
     <div id="list"></div>
+    <div class="card" id="addcard">
+      <h3 style="font-size:20px;margin-bottom:6px">+ Add an exercise</h3>
+      <p class="note">For anything extra today. It's saved for this date only, and the matching plan box shows it too.</p>
+      <div class="addrow"><input class="in" id="addname" list="exlist" placeholder="e.g. Incline bench DB curls" autocomplete="off" aria-label="Exercise name"><button class="btn pri" id="addbtn" type="button">Add</button></div>
+      <datalist id="exlist"></datalist>
+      <p class="note" id="addmsg" style="margin-top:6px"></p>
+    </div>
     <div class="card" id="notescard">
       <h3 style="font-size:20px;margin-bottom:6px">Notes</h3>
       <textarea id="notes" placeholder="How it felt, pain, PRs, swaps…"></textarea>
@@ -372,8 +382,21 @@ const blankSets=n=>Array.from({length:n},()=>({w:"",r:""}));
 function loadDraft(){
   const s=S.sessions[sid()],plan=PLAN[day].x,saved=s?clone(s.ex||[]):[],used=new Set();
   const ex=plan.map(slot=>{const k=saved.findIndex((e,i)=>!used.has(i)&&slot.o.includes(e.n));if(k>=0){used.add(k);return saved[k]}return{n:pick(slot.o),sets:blankSets(slot.s)}});
-  saved.forEach((e,i)=>{if(!used.has(i)&&e.sets.some(filled))ex.push(e)});
+  saved.forEach((e,i)=>{if(!used.has(i)&&(e.sets.some(filled)||e.add))ex.push(e)});
   draft={date,day,notes:s?.notes||"",ex};dirty=false;
+}
+const alsoHTML=L=>(L&&L.length)?`<div class="also">Also logged today (see Extras):${L.map(e=>`<div><b>${esc(e.n)}</b>: ${e.sets.some(filled)?esc(e.sets.filter(filled).map(t=>fmtSet(t,isPlank(e.n),isUni(e.n))).join(", ")):"nothing logged yet"}</div>`).join("")}</div>`:"";
+function refreshAlso(i){const NP=PLAN[day].x.length;if(i<NP)return;const h=homeSlot(draft.ex[i].n),b=h>=0&&$("also"+h);if(b)b.innerHTML=alsoHTML(draft.ex.filter((e,j)=>j>=NP&&homeSlot(e.n)===h))}
+/* Extras (anything after the plan boxes) are linked to one plan box so that box can show "Also logged today".
+   Order: listed as an option in that box > same movement (curl, row, press…) > same muscle group. */
+const MOVES=[/face pull/,/pulldown/,/pullover/,/pushdown/,/lateral/,/leg press/,/leg raise/,/leg ext/,/shoulder press/,/calf/,/crunch/,/plank/,/push-up/,/\brdl/,/squat/,/\brows?\b/,/curl/,/extension/,/\bfl(y|ies)\b/,/press/];
+function homeSlot(name){
+  const P=PLAN[day].x,n=name.toLowerCase();
+  let k=P.findIndex(s=>s.o.includes(name));if(k>=0)return k;
+  const m=MOVES.find(r=>r.test(n));
+  if(m){k=P.findIndex(s=>s.o.some(o=>m.test(o.toLowerCase())));if(k>=0)return k}
+  const g=GRP(name);if(g==="other")return -1;
+  return P.findIndex(s=>s.o.some(o=>GRP(o)===g));
 }
 function rec(name,t){
   if(isPlank(name))return null;
@@ -410,11 +433,12 @@ function renderLog(){
   renderDays();
   const rest=isRest(date)&&!S.sessions[sid()];
   $("dayname").textContent=FULL[dow(date)]+" – "+(rest?"Rest day":PLAN[day].n);
-  $("notescard").style.display=$("askcard").style.display=rest?"none":"";
+  $("notescard").style.display=$("askcard").style.display=$("addcard").style.display=rest?"none":"";
   if(rest){$("list").innerHTML=`<div class="card"><p class="empty">Day off. Your next workout picks up tomorrow.</p></div>`;return}
-  $("notes").value=draft.notes||"";
+  $("notes").value=draft.notes||"";fillExList();
   if(!draft.ex.length){$("list").innerHTML=`<div class="card"><p class="empty">Nothing planned for this day. Add exercises under More → Edit your split.</p></div>`;return}
-  const seen=new Set();
+  const seen=new Set(),NP=PLAN[day].x.length,also={};
+  draft.ex.forEach((e,i)=>{if(i<NP)return;const h=homeSlot(e.n);if(h>=0)(also[h]=also[h]||[]).push(e)});
   $("list").innerHTML=draft.ex.map((cur,i)=>{
     const slot=PLAN[day].x[i]||{o:[cur.n],t:"2×6-8",s:cur.sets.length};
     const p=isPlank(cur.n),u=isUni(cur.n),L=lastFor(cur.n),pb=bestBefore(cur.n);
@@ -432,13 +456,15 @@ function renderLog(){
     const rows=cur.sets.map((t,j)=>{const pv=L&&L.e.sets[j];return u?`<div class="pair">${cell(t,pv,j,"",(j+1)+"L")}${cell(t,pv,j,"2",(j+1)+"R")}</div>`:cell(t,pv,j,"",j+1)}).join("");
     let sum="";
     if(L&&!p){const a=vol(cur.sets),b=vol(L.e.sets);if(a>0&&b>0){const d=a-b;sum=`<div class="sum d ${d>0?"up":d<0?"dn":"eq"}" style="text-align:left">Total volume ${a.toLocaleString()} lb vs ${b.toLocaleString()} last time (${d>=0?"+":""}${d.toLocaleString()})</div>`}}
+    const alsoBox=`<div id="also${i}">${alsoHTML(also[i])}</div>`;
+    const hs=i>=NP?homeSlot(cur.n):-1,link=hs>=0?`<div class="note" style="margin-top:4px">Goes with: ${esc(draft.ex[hs].n)} (plan)</div>`:"";
     const extra=!PLAN[day].x[i],xh=extra&&i===PLAN[day].x.length?`<h2 class="xhead">Extras today <span class="tgt">only saved for this date</span></h2>`:"";
-    return `${xh}<div class="card${extra?" xcard":""}"><div class="ch"><h3>${slot.o.length>1?"Pick one":esc(cur.n)}</h3><span class="tgt">${extra?"extra":esc(slot.t)}</span></div>${head}
+    return `${xh}<div class="card${extra?" xcard":""}" id="ex${i}"><div class="ch"><h3>${slot.o.length>1?"Pick one":esc(cur.n)}</h3><span class="tgt">${extra?"extra":esc(slot.t)}</span></div>${head}${link}${alsoBox}
     ${wu||wk?`<div class="rec">${wu}${wk}</div>`:""}
     <div class="last">${last}</div>
     <div class="row h"><span>Set</span><span>Weight (lb)</span><span>${p?"Seconds":"Reps"}</span><span>vs last</span></div>
     ${rows}${sum}
-    <div class="acts"><button type="button" class="btn" data-add="${i}">+ Set</button>${cur.sets.length>1?`<button type="button" class="btn" data-rm="${i}">− Set</button>`:""}</div></div>`;
+    <div class="acts"><button type="button" class="btn" data-add="${i}">+ Set</button>${cur.sets.length>1?`<button type="button" class="btn" data-rm="${i}">− Set</button>`:""}${extra?`<button type="button" class="btn warn" data-xrm="${i}">Remove</button>`:""}</div></div>`;
   }).join("");
 }
 const status=t=>{$("status").textContent=t};
@@ -517,7 +543,7 @@ function sessionText(){
   const lines=[`Rocky Gym – ${FULL[dow(date)]} (${PLAN[day].n}), ${nice(date)}`];
   draft.ex.forEach((e,i)=>{const slot=PLAN[day].x[i];const p=isPlank(e.n),u=isUni(e.n),L=lastFor(e.n),R=rec(e.n,slot?slot.t:"2×6-8");
     const done=e.sets.filter(filled);
-    lines.push(`\n${e.n}${slot?" ("+slot.t+")":""}`);
+    lines.push(`\n${e.n}${slot?" ("+slot.t+")":" (extra)"}`);
     lines.push("  Today: "+(done.length?done.map(t=>fmtSet(t,p,u)).join(", "):"not done"));
     if(L)lines.push(`  Last (${short(L.s.date)}): `+L.e.sets.filter(filled).map(t=>fmtSet(t,p,u)).join(", "));
     if(R&&R.W>0)lines.push(`  App target: ${R.W} lb × ${R.lo===R.hi?R.lo:R.lo+"-"+R.hi}`);
@@ -545,7 +571,7 @@ $("tplus").addEventListener("click",()=>{tEnd=Math.max(tEnd,Date.now())+30000;$(
 $("tstop").addEventListener("click",stopTimer);
 
 /* ---------- log events ---------- */
-function switchTo(d,k){if(dirty)save();date=d;day=k;loadDraft();renderLog()}
+function switchTo(d,k){if(dirty)save();$("addmsg").textContent="";date=d;day=k;loadDraft();renderLog()}
 $("days").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;const d=addDays(date,+b.dataset.i-dow(date));switchTo(d,dayFor(d))});
 $("date").addEventListener("change",e=>{if(e.target.value)switchTo(e.target.value,dayFor(e.target.value))});
 $("notes").addEventListener("input",e=>{draft.notes=e.target.value;queueSave()});
@@ -556,10 +582,10 @@ $("list").addEventListener("input",e=>{
   const pb=bestBefore(draft.ex[i].n),st=draft.ex[i].sets[j],isPR=pb>0&&e1(st["w"+k],st["r"+k])>pb+0.01;
   d.className="d "+c;d.innerHTML=txt+(isPR?'<span class="pr">PR</span>':"");
   if(c==="up"){d.classList.remove("flash");void d.offsetWidth;d.classList.add("flash")}
-  queueSave();
+  refreshAlso(i);queueSave();
 });
 $("list").addEventListener("change",e=>{const t=e.target;
-  if(t.tagName==="SELECT"){draft.ex[+t.dataset.i].n=t.value;queueSave();renderLog();return}
+  if(t.tagName==="SELECT"){swapOption(+t.dataset.i,t.value);return}
   if(t.tagName==="INPUT"&&/^r/.test(t.dataset.f)&&has(t.value)){
     const ex=draft.ex[+t.dataset.i],j=+t.dataset.j,set=ex.sets[j];
     if(isUni(ex.n)&&!(has(set.r)&&has(set.r2)))return; // switching arms/legs: no rest yet
@@ -572,7 +598,34 @@ $("list").addEventListener("click",e=>{
   const a=e.target.closest("[data-add]"),r=e.target.closest("[data-rm]");
   if(a){const s=draft.ex[+a.dataset.add].sets,l=s[s.length-1];s.push({w:l?.w||"",r:"",w2:l?.w2||"",r2:""});queueSave();renderLog()}
   if(r){draft.ex[+r.dataset.rm].sets.pop();queueSave();renderLog()}
+  const x=e.target.closest("[data-xrm]");
+  if(x){if(!x.dataset.armed){x.dataset.armed=1;x.textContent="Tap again to remove";return}draft.ex.splice(+x.dataset.xrm,1);queueSave();renderLog()}
 });
+/* Switching a plan box to another option keeps what you already logged: the old one moves to Extras,
+   and if the new one was already logged as an extra it moves back into the box (never two copies). */
+function swapOption(i,nn){
+  const NP=PLAN[day].x.length,cur=draft.ex[i];if(!cur||cur.n===nn)return;
+  const k=draft.ex.findIndex((e,j)=>j>=NP&&e.n===nn);
+  const next=k>=0?draft.ex.splice(k,1)[0]:{n:nn,sets:blankSets(PLAN[day].x[i].s)};
+  delete next.add;draft.ex[i]=next;
+  if(cur.sets.some(filled)){cur.add=1;draft.ex.push(cur)}
+  queueSave();renderLog();
+}
+/* + Add an exercise */
+function allNames(){const s=new Set();Object.values(PLAN).forEach(d=>d.x.forEach(x=>x.o.forEach(o=>s.add(o))));Object.values(S.sessions).forEach(z=>(z.ex||[]).forEach(e=>s.add(e.n)));return [...s].sort()}
+function fillExList(){$("exlist").innerHTML=allNames().map(n=>`<option value="${esc(n)}">`).join("")}
+function jumpTo(i){const c=$("ex"+i);if(!c)return;c.scrollIntoView({behavior:"smooth",block:"start"});c.classList.add("hl");setTimeout(()=>c.classList.remove("hl"),1800)}
+function addExtra(){
+  const raw=$("addname").value.trim().replace(/\s+/g," ");if(!raw){$("addmsg").textContent="Type an exercise name first.";return}
+  const name=allNames().find(n=>n.toLowerCase()===raw.toLowerCase())||raw;
+  const j=draft.ex.findIndex(e=>e.n.toLowerCase()===name.toLowerCase());
+  $("addname").value="";
+  if(j>=0){$("addmsg").textContent=name+" is already in today's log, so here it is.";jumpTo(j);return}
+  draft.ex.push({n:name,sets:blankSets(2),add:1});queueSave();renderLog();
+  $("addmsg").textContent="Added "+name+" for today only.";jumpTo(draft.ex.length-1);
+}
+$("addbtn").addEventListener("click",addExtra);
+$("addname").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();addExtra()}});
 
 /* ---------- charts ---------- */
 function lineChart(svg,series,opts={}){
